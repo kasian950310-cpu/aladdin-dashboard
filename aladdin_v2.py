@@ -811,6 +811,141 @@ def load_briefing():
     return None
 
 
+def generate_auto_briefing(mkt: dict, crypto: dict, etfs: dict, fg: dict, cg: dict) -> dict:
+    """실시간 시장 데이터 기반 자동 AI 브리핑 생성 (외부 API 불필요)"""
+    sp_c     = mkt.get('sp500',    {}).get('change', 0)
+    nasdaq_c = mkt.get('nasdaq',   {}).get('change', 0)
+    dow_c    = mkt.get('dow',      {}).get('change', 0)
+    kospi_c  = mkt.get('kospi',    {}).get('change', 0)
+    dxy_c    = mkt.get('dxy',      {}).get('change', 0)
+    dxy_p    = mkt.get('dxy',      {}).get('price',  0)
+    gold_c   = mkt.get('gold',     {}).get('change', 0)
+    gold_p   = mkt.get('gold',     {}).get('price',  0)
+    oil_c    = mkt.get('oil',      {}).get('change', 0)
+    us10y    = mkt.get('us10y',    {}).get('price',  0)
+    us3m     = mkt.get('us3m',     {}).get('price',  0)
+    usdkrw   = mkt.get('usdkrw',  {}).get('price',  0)
+    btc_c    = crypto.get('bitcoin', {}).get('usd_24h_change', 0)
+    btc_usd  = crypto.get('bitcoin', {}).get('usd', 0)
+    eth_c    = crypto.get('ethereum',{}).get('usd_24h_change', 0)
+    fg_val   = fg.get('value', 50)
+    fg_lbl   = fg.get('label', '중립')
+    btc_dom  = cg.get('market_cap_percentage', {}).get('btc', 0)
+    ibit_c   = etfs.get('코인 ETF (기관)', {}).get('IBIT', {}).get('change', 0)
+    tlt_c    = etfs.get('채권 ETF', {}).get('TLT', {}).get('change', 0)
+    spread   = us10y - us3m
+
+    # ── 방향성 점수 계산 ─────────────────────────────────────────────
+    score = 0.0
+    score += 1.5 if sp_c > 1.0 else (0.7 if sp_c > 0.3 else (-0.7 if sp_c < -0.3 else (-1.5 if sp_c < -1.0 else 0)))
+    score += 1.0 if btc_c > 3.0 else (0.4 if btc_c > 1.0 else (-0.4 if btc_c < -1.0 else (-1.0 if btc_c < -3.0 else 0)))
+    score += 0.8 if dxy_c < -0.3 else (-0.8 if dxy_c > 0.3 else 0)
+    score += 0.5 if gold_c < 0 else (-0.5 if gold_c > 1.0 else 0)
+    score += 0.6 if fg_val > 65 else (-0.6 if fg_val < 35 else 0)
+    score += 0.5 if tlt_c > 0.3 else 0
+
+    if score >= 2.0:   direction = 'RISK_ON'
+    elif score <= -2.0: direction = 'RISK_OFF'
+    else:              direction = 'NEUTRAL'
+
+    # ── 시장 요약 ────────────────────────────────────────────────────
+    dir_ko = {'RISK_ON': '위험자산 선호(Risk-On)', 'RISK_OFF': '안전자산 선호(Risk-Off)', 'NEUTRAL': '방향성 탐색(Neutral)'}[direction]
+    summary = (
+        f"현재 글로벌 시장은 {dir_ko} 흐름. "
+        f"S&P 500 {sp_c:+.2f}%, 나스닥 {nasdaq_c:+.2f}%, KOSPI {kospi_c:+.2f}%. "
+        f"비트코인 {btc_c:+.2f}%({btc_usd:,.0f}$), 달러인덱스 {dxy_p:.1f}({dxy_c:+.2f}%). "
+        f"미 10년물 {us10y:.2f}%, 수익률 곡선 {'역전 ⚠️' if spread < 0 else '정상 ✅'}. "
+    )
+    if direction == 'RISK_ON':
+        summary += f"공포탐욕 {fg_val}({fg_lbl})로 낙관 심리 우세. 주식·코인 매수세 유입."
+    elif direction == 'RISK_OFF':
+        summary += f"공포탐욕 {fg_val}({fg_lbl}). 금${gold_p:,.0f} 강세로 안전자산 수요 확인."
+    else:
+        summary += f"공포탐욕 {fg_val}({fg_lbl}). 주요 지표 발표 전 관망세 지속."
+
+    # ── 주요 이슈 ────────────────────────────────────────────────────
+    issues = []
+    if abs(sp_c) >= 1.0:
+        issues.append(f"S&P 500 {'강세' if sp_c>0 else '약세'} {sp_c:+.2f}% — {'기관 매수 유입, 위험선호 확대' if sp_c>0 else '기관 리스크 헤징, 방어적 포지셔닝'}")
+    if abs(btc_c) >= 3.0:
+        issues.append(f"BTC {btc_c:+.2f}% 급{'등' if btc_c>0 else '락'} — {'기관 ETF 순매수, 온체인 강세' if btc_c>0 else '파생상품 롱 청산, 단기 조정'} 신호")
+    if ibit_c != 0:
+        issues.append(f"BlackRock IBIT {ibit_c:+.2f}% — 기관 BTC ETF {'순유입' if ibit_c>0 else '순유출'}, {'월가 코인 수요 확인' if ibit_c>0 else '기관 차익실현 주의'}")
+    if us10y >= 4.5:
+        issues.append(f"미 10년물 {us10y:.2f}% 고공 — 고금리 장기화 우려, 성장주 밸류에이션 압박 지속")
+    elif us10y <= 3.5:
+        issues.append(f"미 10년물 {us10y:.2f}% 하락 — 금리 인하 기대감 강화, 채권·성장주 동반 강세")
+    if spread < 0:
+        issues.append(f"장단기 금리 역전 {spread:+.2f}%p 지속 — 역사적 경기침체 선행 지표, 1~2년 내 침체 확률 상승")
+    if abs(dxy_c) >= 0.5:
+        issues.append(f"달러 {dxy_c:+.2f}% — {'강달러 → 신흥국 자본유출·원자재 하락 압박' if dxy_c>0 else '약달러 → 원자재·신흥국·BTC 우호 환경'}")
+    if gold_c >= 1.0:
+        issues.append(f"금 {gold_c:+.2f}% 상승, ${gold_p:,.0f} — 지정학 리스크·인플레 헤지 수요, 중앙은행 매수 지속")
+    if abs(oil_c) >= 2.0:
+        issues.append(f"원유 {oil_c:+.2f}% — {'공급 차질·지정학 긴장 고조' if oil_c>0 else '글로벌 수요 둔화·OPEC 공급 확대'} 시그널")
+    if usdkrw > 1400:
+        issues.append(f"원/달러 {usdkrw:,.0f}원 — 1,400원 상단, KOSPI 외국인 매도·수입물가 상승 우려")
+    if not issues:
+        issues.append("전 자산군 보합 — 뚜렷한 방향성 없이 혼조세, 주요 경제지표 발표 대기")
+
+    # ── 리스크 요인 ──────────────────────────────────────────────────
+    risks = []
+    if fg_val >= 80:
+        risks.append(f"공포탐욕 {fg_val} '극도의 탐욕' — 과열 구간, 단기 조정 발생 확률 높음")
+    elif fg_val <= 20:
+        risks.append(f"공포탐욕 {fg_val} '극도의 공포' — 패닉셀 단계, 추가 하락 가능성 상존")
+    if us10y >= 4.5:
+        risks.append(f"고금리({us10y:.2f}%) 장기화 — 기업 부채 비용 증가, 소비 위축, 부동산 냉각")
+    if spread < -0.5:
+        risks.append(f"장단기 역전 {spread:+.2f}%p — 1970년 이후 모든 경기침체 전 선행 발생")
+    if dxy_p >= 106:
+        risks.append(f"강달러(DXY {dxy_p:.1f}) — 신흥국 외채 부담 증가, 원화 약세, 수입 물가 상승")
+    if btc_c <= -5:
+        risks.append(f"BTC {btc_c:+.1f}% 급락 — 코인 시장 심리 위축, 알트코인 추가 하락 가능성")
+    if not risks:
+        risks.append("현재 주요 리스크 지표 안정적 — 공포탐욕 중립, 금리·환율 정상 범위 내")
+
+    # ── 핵심 인사이트 ────────────────────────────────────────────────
+    if direction == 'RISK_ON':
+        insight = (
+            f"✅ Risk-On 장세 확인. S&P {sp_c:+.1f}%, BTC {btc_c:+.1f}% 동반 상승으로 기관 자금의 위험자산 유입 확인. "
+            f"IBIT {ibit_c:+.1f}%로 월가 BTC 수요 지속. "
+            f"달러 {dxy_c:+.1f}%로 {'약달러 → 신흥국·원자재에 추가 호재' if dxy_c < 0 else '강달러 → 상승 폭 제한 요인 주의'}. "
+            f"포트폴리오 위험자산 비중 유지, 모멘텀 추종 유효."
+        )
+    elif direction == 'RISK_OFF':
+        insight = (
+            f"⚠️ Risk-Off 장세 전환. 달러·채권·금으로 자금 이동 감지. "
+            f"금 ${gold_p:,.0f}(+{gold_c:.1f}%), 10년물 {us10y:.2f}% 흐름으로 안전자산 수요 확인. "
+            f"{'장단기 역전 지속으로 경기침체 리스크 가중.' if spread < 0 else ''} "
+            f"현금 비중 확대 또는 금·장기채(TLT) 방어 포지션 검토 시점."
+        )
+    else:
+        insight = (
+            f"🟡 방향성 탐색 구간. 공포탐욕 {fg_val}({fg_lbl}), S&P {sp_c:+.1f}%로 뚜렷한 추세 부재. "
+            f"10년물 {us10y:.2f}%, 달러 {dxy_p:.1f} 주목. "
+            f"다음 FOMC·CPI 발표 전 관망 전략 유효. 분할 매수 또는 현금 보유로 신호 대기."
+        )
+
+    # ── 섹터 데이터 ──────────────────────────────────────────────────
+    sector_counts = {}
+    for sym, d in etfs.get('섹터 ETF', {}).items():
+        nm = d.get('name', sym)
+        sector_counts[nm] = max(1, round(abs(d.get('change', 0)) * 10))
+
+    return {
+        'date':             datetime.now().strftime('%Y-%m-%d %H:%M'),
+        'market_direction': direction,
+        'market_summary':   summary,
+        'key_issues':       issues[:5],
+        'risk_factors':     risks[:4],
+        'key_insight':      insight,
+        'total_articles':   0,
+        'sector_counts':    sector_counts,
+        '_auto':            True,
+    }
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 헬퍼
 # ══════════════════════════════════════════════════════════════════════════════
@@ -956,6 +1091,10 @@ def main():
         btc_df = fetch_btc_history()
         news   = fetch_institution_news()
 
+    # JSON 파일 없으면 실시간 데이터로 자동 브리핑 생성
+    if not brief:
+        brief = generate_auto_briefing(mkt, crypto, etfs, fg, cg)
+
     # ══════════════════════════════════════════════════════════════════════════
     # SECTION 1: 돈의 흐름 총괄 신호
     # ══════════════════════════════════════════════════════════════════════════
@@ -993,7 +1132,9 @@ def main():
     # SECTION 2: AI 브리핑
     # ══════════════════════════════════════════════════════════════════════════
     st.markdown("---")
-    st.markdown("### 🤖 AI 시장 브리핑")
+    is_auto_brief = brief.get('_auto', False) if brief else False
+    brief_badge   = '<span style="background:#1a2040;color:#7eb8ff;border:1px solid #3b5bdb;padding:2px 8px;border-radius:12px;font-size:0.72rem;font-weight:600;margin-left:8px;">⚡ 실시간 자동생성</span>' if is_auto_brief else '<span style="background:#0d3320;color:#00e676;border:1px solid #00e676;padding:2px 8px;border-radius:12px;font-size:0.72rem;font-weight:600;margin-left:8px;">📋 daily_report.py</span>'
+    st.markdown(f"### 🤖 AI 시장 브리핑 {brief_badge}", unsafe_allow_html=True)
 
     if brief:
         direction = brief.get('market_direction','NEUTRAL')
@@ -1004,39 +1145,40 @@ def main():
         }
         tag_cls, tag_txt = dir_map.get(direction, dir_map['NEUTRAL'])
 
-        c1, c2 = st.columns([1,3])
+        c1, c2 = st.columns([1, 3])
         with c1:
-            sc = brief.get('sector_counts',{})
+            sc = brief.get('sector_counts', {})
+            data_label = "분석 기준" if is_auto_brief else "수집 기사"
+            data_val   = f"실시간 데이터" if is_auto_brief else f"{brief.get('total_articles',0)}건"
             st.markdown(f"""<div class="card" style="text-align:center;padding:24px 14px;">
                 <p class="label">시장 방향성</p>
                 <div style="margin:10px 0;"><span class="{tag_cls}">{tag_txt}</span></div>
                 <p class="label" style="margin-top:14px;">{brief.get('date','')} 기준</p>
                 <hr style="border-color:#2a3555;margin:10px 0;">
-                <p class="label">수집 기사</p>
-                <p style="font-size:1.3rem;font-weight:700;color:#fff">{brief.get('total_articles',0)}건</p>
+                <p class="label">{data_label}</p>
+                <p style="font-size:0.9rem;font-weight:700;color:#fff">{data_val}</p>
             </div>""", unsafe_allow_html=True)
             if sc:
-                for sec, cnt in sorted(sc.items(), key=lambda x:-x[1])[:5]:
-                    bar_w = int(cnt/max(sc.values())*100)
+                max_cnt = max(sc.values()) if sc else 1
+                for sec, cnt in sorted(sc.items(), key=lambda x: -x[1])[:5]:
+                    bar_w = int(cnt / max_cnt * 100)
                     st.markdown(f"""<div style="margin:3px 0;font-size:0.76rem;">
                         <span style="color:#9aa5c0">{sec[:10]}</span>
                         <div style="background:#1e2535;border-radius:3px;height:5px;margin-top:2px;">
                             <div style="background:#3b5bdb;width:{bar_w}%;height:5px;border-radius:3px;"></div>
                         </div></div>""", unsafe_allow_html=True)
         with c2:
-            tabs = st.tabs(["📊 시장 동향","🔥 주요 이슈","🚨 리스크","💡 인사이트"])
+            tabs = st.tabs(["📊 시장 동향", "🔥 주요 이슈", "🚨 리스크", "💡 인사이트"])
             with tabs[0]:
-                st.markdown(f"<div class='card'><p style='line-height:1.8;color:#c8d0e7'>{brief.get('market_summary','—')}</p></div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='card'><p style='line-height:1.9;color:#c8d0e7'>{brief.get('market_summary','—')}</p></div>", unsafe_allow_html=True)
             with tabs[1]:
-                for iss in brief.get('key_issues',[]):
+                for iss in brief.get('key_issues', []):
                     st.markdown(f"<div style='background:#111827;border-left:3px solid #3b5bdb;border-radius:0 8px 8px 0;padding:9px 14px;margin:5px 0;color:#c8d0e7'>{iss}</div>", unsafe_allow_html=True)
             with tabs[2]:
-                for r in brief.get('risk_factors',[]):
+                for r in brief.get('risk_factors', []):
                     st.markdown(f"<div style='background:#1a0c10;border-left:3px solid #ff4e6a;border-radius:0 8px 8px 0;padding:9px 14px;margin:5px 0;color:#c8d0e7'>⚠️ {r}</div>", unsafe_allow_html=True)
             with tabs[3]:
-                st.markdown(f"<div class='card' style='border-left:4px solid #00e676;'><p style='font-size:1.05rem;color:#fff;line-height:1.8;'>💡 {brief.get('key_insight','—')}</p></div>", unsafe_allow_html=True)
-    else:
-        st.info("📭 오늘 브리핑 없음 — daily_report.py 실행 후 자동 표시됩니다.")
+                st.markdown(f"<div class='card' style='border-left:4px solid #00e676;'><p style='font-size:1.0rem;color:#fff;line-height:1.9;'>💡 {brief.get('key_insight','—')}</p></div>", unsafe_allow_html=True)
 
     # ══════════════════════════════════════════════════════════════════════════
     # SECTION 3: 글로벌 증시

@@ -979,14 +979,14 @@ def main():
     c1, c2 = st.columns([5, 1])
     with c1:
         st.markdown("# 🔮 알라딘 v2.0 — 전세계 돈의 흐름")
-        st.caption(f"글로벌 기관 자금 추적 대시보드 | {now.strftime('%Y-%m-%d %H:%M:%S')} | ⏱️ 1분 자동 갱신")
+        st.caption(f"글로벌 기관 자금 추적 대시보드 | {now.strftime('%Y-%m-%d %H:%M:%S')} | ⏱️ 30분 자동 갱신")
     with c2:
         if st.button("🔄 새로고침", use_container_width=True):
             st.cache_data.clear(); st.rerun()
 
     # 1분 자동 갱신 (JS)
     st.components.v1.html(
-        '<script>setTimeout(function(){window.parent.location.reload();}, 60000);</script>',
+        '<script>setTimeout(function(){window.parent.location.reload();}, 1800000);</script>',
         height=0
     )
 

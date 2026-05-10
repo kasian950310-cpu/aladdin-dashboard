@@ -89,6 +89,41 @@ st.markdown("""
 .news-src  { font-size:0.72rem; color:#6b7a99; }
 .news-title{ font-size:0.88rem; color:#c8d0e7; line-height:1.5; }
 div[data-testid="stMetric"] label { color:#6b7a99 !important; }
+
+/* ── 캘린더 이벤트 툴팁 ─────────────────────────────────────── */
+.ev-wrap { position:relative; display:block; }
+.ev-chip {
+    overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
+    cursor:pointer; border-radius:0 3px 3px 0;
+    padding:2px 4px; margin:2px 0; font-size:0.62rem; line-height:1.3;
+    border-left:2px solid;
+}
+.ev-popup {
+    display:none;
+    position:absolute;
+    z-index:99999;
+    left:0; top:110%;
+    width:260px;
+    background:#1a2035;
+    border:1px solid #4a6ef5;
+    border-radius:10px;
+    padding:12px 14px;
+    box-shadow:0 8px 32px rgba(0,0,0,0.85);
+    pointer-events:none;
+}
+.ev-wrap:hover .ev-popup { display:block; }
+.ev-popup-flag  { font-size:1.1rem; margin-bottom:4px; }
+.ev-popup-title { font-weight:700; color:#ffffff; font-size:0.82rem;
+                  margin-bottom:8px; border-bottom:1px solid #2a3555; padding-bottom:6px; }
+.ev-popup-body  { color:#c8d0e7; font-size:0.75rem; line-height:1.7;
+                  white-space:pre-line; }
+.ev-popup-row   { display:flex; gap:6px; margin-top:8px;
+                  padding-top:8px; border-top:1px solid #2a3555; }
+.ev-popup-up    { color:#00e676; font-size:0.72rem; flex:1; }
+.ev-popup-down  { color:#ff4e6a; font-size:0.72rem; flex:1; }
+
+/* 테이블 overflow 허용 */
+.cal-table, .cal-table td, .cal-table tr, .cal-table tbody { overflow:visible !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -515,59 +550,153 @@ def run_monte_carlo(ticker_symbol: str, days: int, n_sim: int = 100_000):
 
 def get_economic_calendar():
     """주요 경제 이벤트 캘린더 — 미국🇺🇸 + 한국🇰🇷 2026년 일정
-    형식: (날짜, 국가, 이름, 중요도('high'/'mid'), 설명)
+    형식: (날짜, 국가, 이름, 중요도, 설명, 툴팁 본문, 예상치 초과시 영향, 예상치 하회시 영향)
     """
-    events = [
+    # 공통 툴팁 템플릿
+    T = {
+        'us_cpi': (
+            "소비자물가지수 (CPI)\n\nFed 금리 결정에 직접적 영향을 주는 인플레이션의 핵심 지표.\n"
+            "Core CPI(식품·에너지 제외)가 더 중요하게 취급됨.\n"
+            "전월 대비(MoM)와 전년 대비(YoY) 수치를 함께 확인.",
+            "주식↓ 채권↓ 달러↑ BTC↓\n→ 금리 인상/동결 장기화 우려",
+            "주식↑ 채권↑ 달러↓ BTC↑\n→ 금리 인하 기대감 상승"
+        ),
+        'us_nfp': (
+            "비농업 고용자수 (Non-Farm Payrolls)\n\n매월 첫째 금요일 발표, 전세계 금융시장이 주목하는 최대 지표 중 하나.\n"
+            "실업률·시간당 임금 상승률도 함께 확인.\n임금이 높으면 인플레이션 재점화 우려.",
+            "주식 혼조 / 달러↑ 금리↑\n→ 과열 우려 시 오히려 주식 하락 가능",
+            "주식↑(단기) / 달러↓\n→ 금리 인하 기대 상승, 경기 침체 우려도 병존"
+        ),
+        'us_fomc': (
+            "연방공개시장위원회 (FOMC) 금리 결정\n\n연 8회 개최. 전세계 금융시장 최대 이벤트.\n"
+            "결정 직후 파월 의장 기자회견이 실질적인 정책 신호.\n"
+            "점도표(Dot Plot)로 향후 금리 경로 확인 가능.",
+            "금리 인하 → 주식↑ BTC↑ 채권↑ 달러↓",
+            "금리 인상 → 주식↓ BTC↓ 채권↓ 달러↑\n동결이어도 매파 코멘트 시 시장 하락 가능"
+        ),
+        'us_fomc_min': (
+            "FOMC 회의록 (Minutes)\n\n3주 전 금리 결정 회의의 상세 토론 내용 공개.\n"
+            "위원들의 의견 분포, 인플레이션 판단, 향후 경로 힌트.\n매파/비둘기파 의원 비율이 핵심.",
+            "매파적 내용 → 금리 인하 지연 우려\n주식↓ 달러↑",
+            "비둘기파적 내용 → 금리 인하 기대↑\n주식↑ 달러↓"
+        ),
+        'us_pce': (
+            "개인소비지출 물가 (PCE)\n\nFed가 공식 인플레이션 목표로 사용하는 지표 (목표 2%).\n"
+            "CPI보다 Fed에 더 직접적 영향.\n"
+            "Core PCE(식품·에너지 제외)가 핵심 수치.",
+            "목표치 초과 → 금리 인하 지연\n주식↓ 달러↑ 채권↓",
+            "목표치 이하 → 금리 인하 가속 기대\n주식↑ 달러↓ 채권↑"
+        ),
+        'us_retail': (
+            "소매판매 (Retail Sales)\n\nGDP의 70%를 차지하는 미국 소비 동향 파악.\n"
+            "경기 선행 지표로 빠르게 반응.\n자동차·온라인·레스토랑 세부 항목 주목.",
+            "소비 과열 → 인플레 우려 → 금리 동결 장기화\n주식 혼조",
+            "소비 둔화 → 경기침체 우려\n주식↓ 안전자산↑"
+        ),
+        'us_gdp': (
+            "국내총생산 (GDP) 성장률\n\n경기침체 판단 기준: 2분기 연속 마이너스 성장.\n"
+            "예비치 → 수정치 → 최종치 순서로 발표.\n민간소비·설비투자·순수출 세부 항목 분석.",
+            "경기 호조 → 소비·기업 실적 기대↑\n주식↑ 단, 인플레 우려 시 채권↓",
+            "경기침체 공포 → 안전자산↑\n주식↓ 채권↑ 금↑"
+        ),
+        'us_jackson': (
+            "잭슨홀 경제 심포지엄 (Jackson Hole)\n\n매년 8월 와이오밍에서 열리는 Fed 의장 연설.\n"
+            "전세계 중앙은행 총재 참석, 향후 1년 통화정책 방향의 가장 강력한 신호.\n"
+            "2022년 파월 '고통스러운 긴축' 발언으로 주식 -3% 급락 전례.",
+            "매파 연설 → 주식↓ 달러↑ 채권↓\n→ 이후 수주간 시장 압박 지속",
+            "비둘기파 연설 → 주식↑ 달러↓ 채권↑\n→ 연말 랠리 기대감 형성"
+        ),
+        'kr_bok': (
+            "한국은행 금융통화위원회 (금통위)\n\n연 8회 개최, 한국 기준금리 결정.\n"
+            "미국 Fed 정책·환율·가계부채·부동산을 종합 고려.\n"
+            "총재 기자회견에서 향후 방향 힌트 제공.",
+            "금리 인하 → KOSPI↑ 원화 약세\n→ 수출주 호재, 부동산 완화 기대",
+            "금리 인상 → KOSPI 압박\n→ 가계부채·부동산 타격, 원화 강세"
+        ),
+        'kr_cpi': (
+            "한국 소비자물가지수 (CPI)\n\n한국은행 물가 목표: 2%.\n"
+            "식품·에너지 가격 변동에 민감.\n금통위 금리 결정의 핵심 근거 지표.",
+            "목표 초과 → 금통위 금리 인하 제약\n원화 강세 압력, 채권 약세",
+            "목표 하회 → 금리 인하 여건 조성\nKOSPI↑ 채권↑"
+        ),
+        'kr_trade': (
+            "한국 수출입 통계 (무역수지)\n\n한국 경제의 핵심 선행 지표.\n"
+            "반도체(삼성·하이닉스)·자동차·조선 수출이 핵심.\n"
+            "대중국·대미국 수출 동향이 KOSPI 방향 결정.",
+            "수출 호조 → 무역흑자↑ → KOSPI↑ 원화 강세\n→ 수출주(반도체·자동차) 랠리",
+            "수출 부진 → 무역적자 → KOSPI↓ 원화 약세\n→ 글로벌 수요 둔화 신호"
+        ),
+        'kr_gdp': (
+            "한국 GDP 성장률\n\n분기별 경제 성과 종합 평가.\n"
+            "수출·민간소비·건설투자 세부 항목 분석.\n금통위 통화정책 방향에 영향.",
+            "성장률 상회 → 금리 인하 여지 축소\n단기 KOSPI 호재",
+            "성장률 하회 → 금통위 완화 압력↑\n경기 방어주·채권 매수 관심"
+        ),
+        'kr_unemploy': (
+            "한국 실업률 & 고용 동향\n\n청년실업률·체감실업률이 사회적 주목도 높음.\n"
+            "내수 소비 경기의 선행 지표.\n금통위 완화 정책 여부 판단에 활용.",
+            "실업률 하락 → 내수 소비 기대↑\nKOSPI 소비재·유통 섹터 호재",
+            "실업률 상승 → 내수 위축 우려\n금통위 금리 인하 압력 증가"
+        ),
+    }
+
+    # (날짜, 국가, 이름, 중요도, 설명, 툴팁키)
+    raw = [
         # ── 2026년 5월 ─────────────────────────────────────────────
-        ("2026-05-12", "🇰🇷", "금통위 기준금리",    "high", "한국은행 기준금리 결정"),
-        ("2026-05-13", "🇺🇸", "CPI 발표",           "high", "인플레이션 핵심 지표 — 금리 방향"),
-        ("2026-05-15", "🇺🇸", "소매판매",            "mid",  "소비 경기 가늠자"),
-        ("2026-05-20", "🇰🇷", "수출입(4월)",         "mid",  "무역수지 — 경기 선행"),
-        ("2026-05-22", "🇺🇸", "FOMC 회의록",        "high", "Fed 향후 금리 힌트"),
-        ("2026-05-27", "🇰🇷", "소비자물가(CPI)",     "high", "한국 인플레이션 지표"),
-        ("2026-05-29", "🇺🇸", "PCE 물가",           "high", "Fed 선호 인플레이션 지표"),
+        ("2026-05-12", "🇰🇷", "금통위 기준금리",    "high", "한국은행 기준금리 결정",      "kr_bok"),
+        ("2026-05-13", "🇺🇸", "CPI 발표",           "high", "인플레이션 핵심 지표",         "us_cpi"),
+        ("2026-05-15", "🇺🇸", "소매판매",            "mid",  "소비 경기 가늠자",             "us_retail"),
+        ("2026-05-20", "🇰🇷", "수출입(4월)",         "mid",  "무역수지 — 경기 선행",         "kr_trade"),
+        ("2026-05-22", "🇺🇸", "FOMC 회의록",        "high", "Fed 향후 금리 힌트",           "us_fomc_min"),
+        ("2026-05-27", "🇰🇷", "소비자물가(CPI)",     "high", "한국 인플레이션 지표",         "kr_cpi"),
+        ("2026-05-29", "🇺🇸", "PCE 물가",           "high", "Fed 선호 인플레이션 지표",     "us_pce"),
         # ── 2026년 6월 ─────────────────────────────────────────────
-        ("2026-06-03", "🇰🇷", "GDP (1분기 확정)",   "mid",  "성장률 최종 확정치"),
-        ("2026-06-05", "🇺🇸", "NFP 고용",           "high", "비농업 고용 — 금리 결정 핵심"),
-        ("2026-06-09", "🇰🇷", "실업률",             "mid",  "고용 동향 파악"),
-        ("2026-06-10", "🇺🇸", "CPI 발표",           "high", "인플레이션 핵심 지표"),
-        ("2026-06-17", "🇺🇸", "FOMC 금리결정",      "high", "금리 인하/동결/인상 결정"),
-        ("2026-06-23", "🇰🇷", "금통위 기준금리",    "high", "한국은행 기준금리 결정"),
-        ("2026-06-25", "🇺🇸", "GDP (1분기 최종)",   "mid",  "경기침체 여부 판단 기준"),
-        ("2026-06-26", "🇺🇸", "PCE 물가",           "high", "Fed 선호 인플레이션 지표"),
-        ("2026-06-30", "🇰🇷", "수출입(5월)",         "mid",  "무역수지"),
+        ("2026-06-03", "🇰🇷", "GDP (1분기 확정)",   "mid",  "성장률 최종 확정치",           "kr_gdp"),
+        ("2026-06-05", "🇺🇸", "NFP 고용",           "high", "비농업 고용 — 금리 결정 핵심", "us_nfp"),
+        ("2026-06-09", "🇰🇷", "실업률",             "mid",  "고용 동향 파악",               "kr_unemploy"),
+        ("2026-06-10", "🇺🇸", "CPI 발표",           "high", "인플레이션 핵심 지표",         "us_cpi"),
+        ("2026-06-17", "🇺🇸", "FOMC 금리결정",      "high", "금리 인하/동결/인상 결정",     "us_fomc"),
+        ("2026-06-23", "🇰🇷", "금통위 기준금리",    "high", "한국은행 기준금리 결정",       "kr_bok"),
+        ("2026-06-25", "🇺🇸", "GDP (1분기 최종)",   "mid",  "경기침체 여부 판단 기준",      "us_gdp"),
+        ("2026-06-26", "🇺🇸", "PCE 물가",           "high", "Fed 선호 인플레이션 지표",     "us_pce"),
+        ("2026-06-30", "🇰🇷", "수출입(5월)",         "mid",  "무역수지",                    "kr_trade"),
         # ── 2026년 7월 ─────────────────────────────────────────────
-        ("2026-07-02", "🇺🇸", "NFP 고용",           "high", "비농업 고용"),
-        ("2026-07-08", "🇰🇷", "수출입(6월)",         "mid",  "무역수지"),
-        ("2026-07-14", "🇺🇸", "CPI 발표",           "high", "인플레이션 핵심 지표"),
-        ("2026-07-22", "🇰🇷", "금통위 기준금리",    "high", "한국은행 기준금리 결정"),
-        ("2026-07-24", "🇰🇷", "소비자물가(CPI)",     "high", "한국 인플레이션 지표"),
-        ("2026-07-28", "🇺🇸", "FOMC 금리결정",      "high", "금리 인하/동결/인상 결정"),
-        ("2026-07-30", "🇺🇸", "GDP (2분기 예비)",   "mid",  "2분기 경기 성적표"),
+        ("2026-07-02", "🇺🇸", "NFP 고용",           "high", "비농업 고용",                  "us_nfp"),
+        ("2026-07-08", "🇰🇷", "수출입(6월)",         "mid",  "무역수지",                    "kr_trade"),
+        ("2026-07-14", "🇺🇸", "CPI 발표",           "high", "인플레이션 핵심 지표",         "us_cpi"),
+        ("2026-07-22", "🇰🇷", "금통위 기준금리",    "high", "한국은행 기준금리 결정",       "kr_bok"),
+        ("2026-07-24", "🇰🇷", "소비자물가(CPI)",     "high", "한국 인플레이션 지표",         "kr_cpi"),
+        ("2026-07-28", "🇺🇸", "FOMC 금리결정",      "high", "금리 인하/동결/인상 결정",     "us_fomc"),
+        ("2026-07-30", "🇺🇸", "GDP (2분기 예비)",   "mid",  "2분기 경기 성적표",            "us_gdp"),
         # ── 2026년 8월 ─────────────────────────────────────────────
-        ("2026-08-06", "🇺🇸", "NFP 고용",           "high", "비농업 고용"),
-        ("2026-08-12", "🇺🇸", "CPI 발표",           "high", "인플레이션 핵심 지표"),
-        ("2026-08-25", "🇺🇸", "잭슨홀 심포지엄",    "high", "Fed 의장 연설 — 정책 방향 신호"),
-        ("2026-08-27", "🇰🇷", "금통위 기준금리",    "high", "한국은행 기준금리 결정"),
-        ("2026-08-28", "🇰🇷", "소비자물가(CPI)",     "high", "한국 인플레이션 지표"),
+        ("2026-08-06", "🇺🇸", "NFP 고용",           "high", "비농업 고용",                  "us_nfp"),
+        ("2026-08-12", "🇺🇸", "CPI 발표",           "high", "인플레이션 핵심 지표",         "us_cpi"),
+        ("2026-08-25", "🇺🇸", "잭슨홀 심포지엄",    "high", "Fed 의장 연설 — 정책 방향",    "us_jackson"),
+        ("2026-08-27", "🇰🇷", "금통위 기준금리",    "high", "한국은행 기준금리 결정",       "kr_bok"),
+        ("2026-08-28", "🇰🇷", "소비자물가(CPI)",     "high", "한국 인플레이션 지표",         "kr_cpi"),
         # ── 2026년 9월 ─────────────────────────────────────────────
-        ("2026-09-03", "🇺🇸", "NFP 고용",           "high", "비농업 고용"),
-        ("2026-09-10", "🇺🇸", "CPI 발표",           "high", "인플레이션 핵심 지표"),
-        ("2026-09-15", "🇺🇸", "FOMC 금리결정",      "high", "금리 인하/동결/인상 결정"),
-        ("2026-09-24", "🇰🇷", "금통위 기준금리",    "high", "한국은행 기준금리 결정"),
+        ("2026-09-03", "🇺🇸", "NFP 고용",           "high", "비농업 고용",                  "us_nfp"),
+        ("2026-09-10", "🇺🇸", "CPI 발표",           "high", "인플레이션 핵심 지표",         "us_cpi"),
+        ("2026-09-15", "🇺🇸", "FOMC 금리결정",      "high", "금리 인하/동결/인상 결정",     "us_fomc"),
+        ("2026-09-24", "🇰🇷", "금통위 기준금리",    "high", "한국은행 기준금리 결정",       "kr_bok"),
     ]
+
     today = datetime.now().date()
     result = []
-    for date_str, flag, name, importance, desc in events:
+    for date_str, flag, name, importance, desc, t_key in raw:
         event_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        days_left = (event_date - today).days
+        days_left  = (event_date - today).days
+        tip_body, tip_up, tip_down = T.get(t_key, (desc, "", ""))
         result.append({
-            'date': date_str,
-            'flag': flag,
-            'name': name,
+            'date':       date_str,
+            'flag':       flag,
+            'name':       name,
             'importance': importance,
-            'desc': desc,
-            'days_left': days_left,
+            'desc':       desc,
+            'days_left':  days_left,
+            'tip_body':   tip_body,
+            'tip_up':     tip_up,
+            'tip_down':   tip_down,
         })
     return sorted(result, key=lambda x: x['days_left'])
 
@@ -621,14 +750,32 @@ def render_calendar_month(year: int, month: int, events_by_date: dict, today) ->
                     border_c = "#2a3a60" if is_us else "#4a3000"
                     txt_c    = "#5a7aaa" if is_us else "#7a5500"
 
-                ev_desc  = ev['desc']
-                ev_flag  = ev['flag']
-                ev_name  = ev['name']
+                ev_flag     = ev['flag']
+                ev_name     = ev['name']
+                ev_tip_body = ev.get('tip_body', ev.get('desc', ''))
+                ev_tip_up   = ev.get('tip_up', '')
+                ev_tip_down = ev.get('tip_down', '')
+                imp_label   = "🔴 고중요" if ev['importance'] == 'high' else "🟡 중요"
+
+                # 팝업 우측 오버플로우 방지: 토요일(weekday==5), 일요일(weekday==6) → 왼쪽 정렬
+                popup_left = "auto" if weekday >= 5 else "0"
+                popup_right = "0" if weekday >= 5 else "auto"
+
+                up_html   = f'<div class="ev-popup-up">📈 예상 초과<br>{ev_tip_up}</div>' if ev_tip_up else ''
+                down_html = f'<div class="ev-popup-down">📉 예상 하회<br>{ev_tip_down}</div>' if ev_tip_down else ''
+                row_html_tip = f'<div class="ev-popup-row">{up_html}{down_html}</div>' if (up_html or down_html) else ''
+
                 ev_html += (
-                    f'<div title="{ev_desc}" style="background:{bg_ev};border-left:2px solid {border_c};'
-                    f'padding:2px 4px;margin:2px 0;border-radius:0 3px 3px 0;font-size:0.62rem;'
-                    f'color:{txt_c};line-height:1.3;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;'
-                    f'cursor:default;">{ev_flag} {ev_name}</div>'
+                    f'<div class="ev-wrap">'
+                    f'<div class="ev-chip" style="background:{bg_ev};border-left-color:{border_c};color:{txt_c};">'
+                    f'{ev_flag} {ev_name}</div>'
+                    f'<div class="ev-popup" style="left:{popup_left};right:{popup_right};">'
+                    f'<div class="ev-popup-flag">{ev_flag}</div>'
+                    f'<div class="ev-popup-title">{ev_name} &nbsp;<span style="font-size:0.68rem;color:#6b7a99;font-weight:400">{imp_label}</span></div>'
+                    f'<div class="ev-popup-body">{ev_tip_body}</div>'
+                    f'{row_html_tip}'
+                    f'</div>'
+                    f'</div>'
                 )
 
             row_html += (
@@ -640,7 +787,8 @@ def render_calendar_month(year: int, month: int, events_by_date: dict, today) ->
         rows_html += f"<tr>{row_html}</tr>"
 
     return (
-        f'<table style="width:100%;border-collapse:collapse;table-layout:fixed;">'
+        f'<table class="cal-table" style="width:100%;border-collapse:collapse;'
+        f'table-layout:fixed;overflow:visible;">'
         f'<thead><tr>{header_cells}</tr></thead>'
         f'<tbody>{rows_html}</tbody>'
         f'</table>'

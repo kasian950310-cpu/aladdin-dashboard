@@ -9,7 +9,9 @@ import os, json, requests, feedparser
 import streamlit as st
 import yfinance as yf
 import plotly.graph_objects as go
+import plotly.express as px
 import pandas as pd
+import numpy as np
 from datetime import datetime
 from pathlib import Path
 
@@ -94,7 +96,7 @@ div[data-testid="stMetric"] label { color:#6b7a99 !important; }
 # ══════════════════════════════════════════════════════════════════════════════
 # 데이터 페치
 # ══════════════════════════════════════════════════════════════════════════════
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def fetch_market():
     syms = {
         'sp500':'^GSPC','nasdaq':'^IXIC','dow':'^DJI',
@@ -120,7 +122,7 @@ def fetch_market():
     return out
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=120)
 def fetch_etfs():
     """큰손 ETF — 주식/채권/코인/섹터별 자금 추적"""
     groups = {
@@ -290,6 +292,262 @@ def fetch_btc_history():
         return pd.DataFrame()
 
 
+def get_risk_scenarios():
+    """25개+ 리스크 시나리오 — 자산별 충격 범위 (역사적 데이터 기반)"""
+    # 형식: {자산: (최소%, 최대%)}
+    return {
+        "🏦 금리 인상 +0.5% (매파적 Fed)": {
+            "설명": "연준이 예상보다 공격적으로 기준금리 0.5% 인상 결정",
+            "선행사례": "2022년 연속 자이언트스텝",
+            "S&P500": (-5, -8), "나스닥": (-7, -12), "KOSPI": (-5, -9),
+            "BTC": (-10, -18), "금": (-3, -6), "장기채(TLT)": (-6, -10),
+            "달러(DXY)": (2, 4), "원유": (-2, -5), "신흥국": (-6, -10),
+        },
+        "🏦 금리 인상 +1% (초긴축)": {
+            "설명": "글로벌 인플레이션 재점화로 1%p 급격한 금리 인상",
+            "선행사례": "1994년 연준 긴축, 2022년 자이언트스텝 4회 연속",
+            "S&P500": (-10, -15), "나스닥": (-15, -22), "KOSPI": (-10, -16),
+            "BTC": (-20, -35), "금": (-5, -10), "장기채(TLT)": (-12, -18),
+            "달러(DXY)": (4, 8), "원유": (-3, -8), "신흥국": (-12, -18),
+        },
+        "🏦 금리 인상 +2% (충격 긴축)": {
+            "설명": "극단적 인플레이션 대응, 1980년 볼커쇼크 수준",
+            "선행사례": "1980년 폴 볼커 Fed 의장, 금리 20% 인상",
+            "S&P500": (-20, -30), "나스닥": (-30, -45), "KOSPI": (-18, -28),
+            "BTC": (-40, -60), "금": (-8, -15), "장기채(TLT)": (-20, -30),
+            "달러(DXY)": (8, 15), "원유": (-5, -15), "신흥국": (-20, -35),
+        },
+        "✂️ 금리 인하 -0.5% (완화적 피벗)": {
+            "설명": "연준이 경기 방어를 위해 금리 인하 시작",
+            "선행사례": "2019년 보험성 금리 인하",
+            "S&P500": (3, 8), "나스닥": (5, 12), "KOSPI": (3, 7),
+            "BTC": (10, 25), "금": (2, 6), "장기채(TLT)": (4, 8),
+            "달러(DXY)": (-2, -5), "원유": (2, 5), "신흥국": (4, 9),
+        },
+        "✂️ 금리 인하 -1% (공격적 완화)": {
+            "설명": "경기침체 예방을 위한 대규모 금리 인하",
+            "선행사례": "2020년 코로나 긴급 인하, 2008년 금융위기",
+            "S&P500": (8, 18), "나스닥": (12, 25), "KOSPI": (7, 15),
+            "BTC": (25, 50), "금": (5, 12), "장기채(TLT)": (8, 15),
+            "달러(DXY)": (-5, -10), "원유": (5, 10), "신흥국": (8, 18),
+        },
+        "📉 경미한 경기침체 (-20%)": {
+            "설명": "기술적 침체(2분기 연속 GDP 감소), 실업률 소폭 상승",
+            "선행사례": "2001년 닷컴 버블 초기, 1990년 걸프전 침체",
+            "S&P500": (-15, -25), "나스닥": (-20, -35), "KOSPI": (-15, -22),
+            "BTC": (-30, -50), "금": (5, 15), "장기채(TLT)": (8, 15),
+            "달러(DXY)": (2, 6), "원유": (-15, -30), "신흥국": (-18, -28),
+        },
+        "📉 심각한 경기침체 (-40%)": {
+            "설명": "금융시스템 위기 동반, 실업률 급등, 신용경색",
+            "선행사례": "2008~2009 금융위기, S&P500 -57%",
+            "S&P500": (-35, -50), "나스닥": (-45, -65), "KOSPI": (-35, -50),
+            "BTC": (-60, -80), "금": (15, 30), "장기채(TLT)": (20, 35),
+            "달러(DXY)": (5, 12), "원유": (-40, -65), "신흥국": (-40, -60),
+        },
+        "🏦 SVB형 은행 위기": {
+            "설명": "지역은행 연쇄 파산, 예금 인출 사태, 신용 경색",
+            "선행사례": "2023년 SVB·크레디트스위스 사태",
+            "S&P500": (-8, -15), "나스닥": (-8, -14), "KOSPI": (-7, -13),
+            "BTC": (-15, -25), "금": (5, 12), "장기채(TLT)": (5, 12),
+            "달러(DXY)": (-2, -5), "원유": (-8, -15), "신흥국": (-10, -18),
+        },
+        "💣 2008형 글로벌 금융위기": {
+            "설명": "시스템 리스크, 파생상품 붕괴, 글로벌 신용동결",
+            "선행사례": "2008 리먼브라더스 파산",
+            "S&P500": (-40, -57), "나스닥": (-45, -60), "KOSPI": (-50, -65),
+            "BTC": (-70, -85), "금": (10, 25), "장기채(TLT)": (15, 30),
+            "달러(DXY)": (8, 15), "원유": (-50, -70), "신흥국": (-50, -70),
+        },
+        "₿ BTC 급락 -30%": {
+            "설명": "규제 이슈 또는 대형 거래소 해킹으로 급락",
+            "선행사례": "2021년 중국 채굴 금지, 2022년 FTX 사태 초기",
+            "S&P500": (-2, -5), "나스닥": (-3, -7), "KOSPI": (-2, -4),
+            "BTC": (-28, -35), "금": (0, 3), "장기채(TLT)": (0, 2),
+            "달러(DXY)": (0, 2), "원유": (-1, -3), "신흥국": (-2, -5),
+        },
+        "₿ BTC 폭락 -50%": {
+            "설명": "기관 대규모 매도, ETF 환매 폭증, 시장 공황",
+            "선행사례": "2021년 5월 -53%, 2022년 LUNA 붕괴",
+            "S&P500": (-3, -8), "나스닥": (-5, -10), "KOSPI": (-3, -7),
+            "BTC": (-48, -55), "금": (2, 6), "장기채(TLT)": (1, 4),
+            "달러(DXY)": (1, 3), "원유": (-2, -5), "신흥국": (-4, -8),
+        },
+        "₿ BTC 대폭락 -80% (크립토 겨울)": {
+            "설명": "규제 전면금지 또는 기술적 결함 발견으로 붕괴",
+            "선행사례": "2018년 크립토 겨울 -84%, 2022년 -77%",
+            "S&P500": (-5, -12), "나스닥": (-8, -15), "KOSPI": (-5, -10),
+            "BTC": (-75, -85), "금": (3, 8), "장기채(TLT)": (2, 6),
+            "달러(DXY)": (2, 5), "원유": (-3, -7), "신흥국": (-6, -12),
+        },
+        "₿ BTC 대호황 (ETF 대규모 유입)": {
+            "설명": "기관 ETF 통한 대규모 자금 유입, 반감기 효과",
+            "선행사례": "2024년 현물 ETF 승인 후 랠리",
+            "S&P500": (3, 8), "나스닥": (5, 12), "KOSPI": (2, 6),
+            "BTC": (50, 150), "금": (2, 5), "장기채(TLT)": (-2, -5),
+            "달러(DXY)": (-1, -3), "원유": (1, 4), "신흥국": (3, 8),
+        },
+        "💵 달러 강세 (DXY +5%)": {
+            "설명": "미국 경제 상대적 우위, 안전자산 달러 수요 급증",
+            "선행사례": "2022년 달러 인덱스 114 돌파",
+            "S&P500": (-3, -7), "나스닥": (-4, -8), "KOSPI": (-7, -12),
+            "BTC": (-5, -10), "금": (-5, -9), "장기채(TLT)": (-3, -6),
+            "달러(DXY)": (4, 6), "원유": (-5, -9), "신흥국": (-10, -16),
+        },
+        "💵 달러 강세 (DXY +10%)": {
+            "설명": "글로벌 달러 부족, 신흥국 외채위기 촉발",
+            "선행사례": "1997년 아시아 외환위기",
+            "S&P500": (-6, -12), "나스닥": (-8, -15), "KOSPI": (-15, -25),
+            "BTC": (-10, -20), "금": (-8, -15), "장기채(TLT)": (-5, -10),
+            "달러(DXY)": (9, 11), "원유": (-10, -18), "신흥국": (-20, -35),
+        },
+        "💸 달러 약세 (DXY -10%)": {
+            "설명": "미국 재정적자 우려, 달러 기축통화 지위 흔들",
+            "선행사례": "2020년 코로나 부양책 이후 달러 약세",
+            "S&P500": (5, 12), "나스닥": (6, 14), "KOSPI": (8, 15),
+            "BTC": (15, 30), "금": (8, 15), "장기채(TLT)": (3, 8),
+            "달러(DXY)": (-9, -11), "원유": (8, 15), "신흥국": (10, 20),
+        },
+        "⚔️ 러시아-우크라이나 확전": {
+            "설명": "NATO 직접 개입 또는 핵 위협 고조",
+            "선행사례": "2022년 2월 침공 초기 충격",
+            "S&P500": (-8, -15), "나스닥": (-8, -14), "KOSPI": (-8, -13),
+            "BTC": (-15, -25), "금": (8, 18), "장기채(TLT)": (2, 6),
+            "달러(DXY)": (3, 7), "원유": (20, 45), "신흥국": (-12, -20),
+        },
+        "⚔️ 중동 전쟁 확산 (이란 참전)": {
+            "설명": "호르무즈 해협 봉쇄, 원유 공급 30% 차단",
+            "선행사례": "1973년 오일쇼크, 1990년 걸프전",
+            "S&P500": (-10, -18), "나스닥": (-10, -16), "KOSPI": (-10, -17),
+            "BTC": (-15, -25), "금": (12, 25), "장기채(TLT)": (3, 8),
+            "달러(DXY)": (4, 8), "원유": (30, 80), "신흥국": (-12, -22),
+        },
+        "🇨🇳 대만 침공 위기": {
+            "설명": "중국 대만 해협 봉쇄, 반도체 공급망 붕괴",
+            "선행사례": "1996년 대만해협 위기",
+            "S&P500": (-15, -25), "나스닥": (-20, -35), "KOSPI": (-20, -35),
+            "BTC": (-25, -40), "금": (10, 20), "장기채(TLT)": (3, 8),
+            "달러(DXY)": (5, 10), "원유": (15, 35), "신흥국": (-20, -35),
+        },
+        "🇨🇳 중국 경제 위기 (부동산 붕괴)": {
+            "설명": "헝다 사태 재발, 중국 부동산 버블 전면 붕괴",
+            "선행사례": "2021년 헝다 디폴트, 일본 1990년대 잃어버린 10년",
+            "S&P500": (-8, -15), "나스닥": (-10, -18), "KOSPI": (-15, -25),
+            "BTC": (-15, -28), "금": (5, 12), "장기채(TLT)": (5, 10),
+            "달러(DXY)": (3, 7), "원유": (-10, -20), "신흥국": (-20, -35),
+        },
+        "🛢️ 유가 폭등 +50% (공급 위기)": {
+            "설명": "OPEC 극단적 감산 + 지정학적 공급 차단",
+            "선행사례": "1973년 오일쇼크, 1979년 이란혁명",
+            "S&P500": (-8, -15), "나스닥": (-10, -18), "KOSPI": (-8, -14),
+            "BTC": (-10, -20), "금": (8, 15), "장기채(TLT)": (-5, -10),
+            "달러(DXY)": (2, 5), "원유": (45, 60), "신흥국": (-10, -18),
+        },
+        "🛢️ 유가 폭락 -50% (수요 붕괴)": {
+            "설명": "글로벌 경기침체 + EV 전환 가속으로 수요 급감",
+            "선행사례": "2020년 코로나 -77%, 2014년 셰일혁명",
+            "S&P500": (-3, -8), "나스닥": (-2, -6), "KOSPI": (-4, -8),
+            "BTC": (-5, -12), "금": (3, 8), "장기채(TLT)": (3, 7),
+            "달러(DXY)": (-1, -3), "원유": (-48, -55), "신흥국": (-8, -15),
+        },
+        "🤖 AI 버블 붕괴": {
+            "설명": "AI 수익성 의구심, 빅테크 실적 실망으로 나스닥 급락",
+            "선행사례": "2000년 닷컴 버블 붕괴, 나스닥 -78%",
+            "S&P500": (-15, -25), "나스닥": (-35, -55), "KOSPI": (-15, -25),
+            "BTC": (-20, -35), "금": (5, 12), "장기채(TLT)": (8, 15),
+            "달러(DXY)": (2, 5), "원유": (-5, -12), "신흥국": (-12, -20),
+        },
+        "🤖 AI 랠리 지속 (슈퍼사이클)": {
+            "설명": "AGI 개발 성과 발표, 생산성 혁명으로 주식 급등",
+            "선행사례": "1990년대 닷컴 버블 상승기, 나스닥 +1000%",
+            "S&P500": (15, 35), "나스닥": (25, 60), "KOSPI": (10, 20),
+            "BTC": (30, 80), "금": (-3, -8), "장기채(TLT)": (-8, -15),
+            "달러(DXY)": (2, 5), "원유": (5, 12), "신흥국": (8, 18),
+        },
+        "🌐 달러 기축통화 위기": {
+            "설명": "BRICS 기축통화 도입, 달러 준비통화 비중 급감",
+            "선행사례": "1971년 닉슨쇼크, 브레턴우즈 체제 붕괴",
+            "S&P500": (-10, -20), "나스닥": (-12, -22), "KOSPI": (2, 8),
+            "BTC": (30, 70), "금": (20, 40), "장기채(TLT)": (-15, -25),
+            "달러(DXY)": (-15, -25), "원유": (10, 25), "신흥국": (5, 15),
+        },
+    }
+
+
+@st.cache_data(ttl=3600)
+def run_monte_carlo(ticker_symbol: str, days: int, n_sim: int = 100_000):
+    """기하브라운운동(GBM) 기반 몬테카를로 시뮬레이션"""
+    try:
+        hist = yf.Ticker(ticker_symbol).history(period='1y')['Close'].dropna()
+        if len(hist) < 30:
+            return None
+        returns = hist.pct_change().dropna()
+        mu    = float(returns.mean())
+        sigma = float(returns.std())
+        S0    = float(hist.iloc[-1])
+        dt    = 1 / 252
+
+        # 10만 경로 한번에 계산 (numpy 벡터화)
+        Z = np.random.standard_normal((days, n_sim))
+        daily_r = np.exp((mu - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * Z)
+        paths = S0 * np.cumprod(daily_r, axis=0)
+
+        final = paths[-1]
+        return {
+            'S0': S0, 'mu': mu, 'sigma': sigma,
+            'paths_sample': paths[:, :200],   # 차트용 200개 샘플
+            'final': final,
+            'p5':  float(np.percentile(final, 5)),
+            'p25': float(np.percentile(final, 25)),
+            'p50': float(np.percentile(final, 50)),
+            'p75': float(np.percentile(final, 75)),
+            'p95': float(np.percentile(final, 95)),
+            'prob_up10':  float((final > S0 * 1.10).mean() * 100),
+            'prob_up25':  float((final > S0 * 1.25).mean() * 100),
+            'prob_up50':  float((final > S0 * 1.50).mean() * 100),
+            'prob_down10': float((final < S0 * 0.90).mean() * 100),
+            'prob_down25': float((final < S0 * 0.75).mean() * 100),
+            'prob_down50': float((final < S0 * 0.50).mean() * 100),
+        }
+    except:
+        return None
+
+
+def get_economic_calendar():
+    """주요 경제 이벤트 캘린더 — 2026년 일정"""
+    events = [
+        # (날짜, 이름, 중요도, 예상영향, 아이콘)
+        ("2026-05-13", "미국 CPI 발표",        "🔴", "인플레이션 핵심 지표 — 금리 방향 결정", "📊"),
+        ("2026-05-15", "미국 소매판매",          "🟡", "소비 경기 가늠자",                    "🛍️"),
+        ("2026-05-22", "FOMC 회의록 공개",       "🔴", "Fed 향후 금리 힌트",                   "🏦"),
+        ("2026-06-05", "미국 NFP 고용지표",      "🔴", "고용 = 금리 결정의 핵심",              "👷"),
+        ("2026-06-10", "미국 CPI 발표",         "🔴", "인플레이션 핵심 지표",                  "📊"),
+        ("2026-06-17", "FOMC 금리 결정",        "🔴 🔴", "금리 인하/동결/인상 결정",           "🏛️"),
+        ("2026-06-25", "미국 GDP (1분기 최종)",  "🟡", "경기침체 여부 판단 기준",               "📈"),
+        ("2026-07-02", "미국 NFP 고용지표",      "🔴", "고용 = 금리 결정의 핵심",              "👷"),
+        ("2026-07-14", "미국 CPI 발표",         "🔴", "인플레이션 핵심 지표",                  "📊"),
+        ("2026-07-28", "FOMC 금리 결정",        "🔴 🔴", "금리 인하/동결/인상 결정",           "🏛️"),
+        ("2026-08-06", "미국 NFP 고용지표",      "🔴", "고용 = 금리 결정의 핵심",              "👷"),
+        ("2026-08-12", "미국 CPI 발표",         "🔴", "인플레이션 핵심 지표",                  "📊"),
+        ("2026-09-15", "FOMC 금리 결정",        "🔴 🔴", "금리 인하/동결/인상 결정",           "🏛️"),
+    ]
+    today = datetime.now().date()
+    result = []
+    for date_str, name, importance, desc, icon in events:
+        event_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        days_left = (event_date - today).days
+        if days_left >= 0:
+            result.append({
+                'date': date_str,
+                'name': name,
+                'importance': importance,
+                'desc': desc,
+                'icon': icon,
+                'days_left': days_left,
+            })
+    return sorted(result, key=lambda x: x['days_left'])[:7]
+
+
 def load_briefing():
     paths = [
         Path(os.environ.get('BRIEFING_PATH', '/nonexistent')),
@@ -339,10 +597,44 @@ def main():
     c1, c2 = st.columns([5, 1])
     with c1:
         st.markdown("# 🔮 알라딘 v2.0 — 전세계 돈의 흐름")
-        st.caption(f"글로벌 기관 자금 추적 대시보드 | {now.strftime('%Y-%m-%d %H:%M:%S')} | 5분 자동 갱신")
+        st.caption(f"글로벌 기관 자금 추적 대시보드 | {now.strftime('%Y-%m-%d %H:%M:%S')} | ⏱️ 1분 자동 갱신")
     with c2:
         if st.button("🔄 새로고침", use_container_width=True):
             st.cache_data.clear(); st.rerun()
+
+    # 1분 자동 갱신 (JS)
+    st.components.v1.html(
+        '<script>setTimeout(function(){window.parent.location.reload();}, 60000);</script>',
+        height=0
+    )
+
+    # ── 경제 캘린더 (최상단) ────────────────────────────────────────────────────
+    calendar = get_economic_calendar()
+    if calendar:
+        st.markdown("### 📅 주요 경제 일정")
+        cols_cal = st.columns(len(calendar))
+        for col, ev in zip(cols_cal, calendar):
+            d = ev['days_left']
+            if d == 0:
+                badge_color = "#ff4e6a"; badge_txt = "🔔 오늘!"
+            elif d <= 3:
+                badge_color = "#ff9800"; badge_txt = f"D-{d}"
+            elif d <= 7:
+                badge_color = "#ffb300"; badge_txt = f"D-{d}"
+            else:
+                badge_color = "#3b5bdb"; badge_txt = f"D-{d}"
+            with col:
+                st.markdown(f"""<div class="card" style="text-align:center;padding:12px 8px;">
+                    <p style="font-size:1.3rem;margin:0">{ev['icon']}</p>
+                    <p style="font-size:0.72rem;color:#9aa5c0;margin:2px 0">{ev['date']}</p>
+                    <p style="font-size:0.78rem;font-weight:700;color:#c8d0e7;margin:4px 0;line-height:1.3">{ev['name']}</p>
+                    <div style="margin:6px 0;">
+                        <span style="background:{badge_color}22;color:{badge_color};border:1px solid {badge_color};
+                            padding:2px 10px;border-radius:20px;font-weight:700;font-size:0.85rem;">{badge_txt}</span>
+                    </div>
+                    <p style="font-size:0.68rem;color:#6b7a99;margin:0;line-height:1.4">{ev['importance']} {ev['desc']}</p>
+                </div>""", unsafe_allow_html=True)
+        st.markdown("---")
 
     # ── 데이터 로딩 ────────────────────────────────────────────────────────────
     with st.spinner("전세계 시장 + 기관 ETF 데이터 수집 중..."):
@@ -650,6 +942,307 @@ def main():
                     </div>""", unsafe_allow_html=True)
     else:
         st.info("뉴스 로딩 중... (feedparser 설치 필요: pip3 install feedparser)")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 8: 리스크 시뮬레이션 — 블랙록 알라딘 스타일
+    # ══════════════════════════════════════════════════════════════════════════
+    st.markdown("---")
+    st.markdown("### 🎯 리스크 시뮬레이션 — 생존 중심 포트폴리오 분석")
+    st.caption("블랙록 알라딘 철학: 수익 극대화가 아닌 생존 확률 극대화 | 25개 시나리오 + 10만 개의 미래 시뮬레이션")
+
+    risk_tabs = st.tabs(["📋 25개 시나리오 분석", "📊 몬테카를로 (10만 시뮬레이션)"])
+
+    # ── Tab 1: 시나리오 분석 ────────────────────────────────────────────────
+    with risk_tabs[0]:
+        scenarios = get_risk_scenarios()
+        if scenarios:
+            scenario_names = list(scenarios.keys())
+            assets = ['S&P500', '나스닥', 'KOSPI', 'BTC', '금', '장기채(TLT)', '달러(DXY)', '원유', '신흥국']
+
+            selected_scenario = st.selectbox(
+                "시나리오 선택", scenario_names, index=0, label_visibility='collapsed'
+            )
+            sc = scenarios[selected_scenario]
+
+            col_info, col_chart = st.columns([1, 2])
+
+            with col_info:
+                st.markdown(f"""<div class="card">
+                    <p style="font-size:0.95rem;font-weight:700;color:#c8d0e7;margin-bottom:8px">{selected_scenario}</p>
+                    <p style="font-size:0.82rem;color:#9aa5c0;line-height:1.6">{sc.get('설명','')}</p>
+                    <hr style="border-color:#2a3555;margin:8px 0">
+                    <p style="font-size:0.72rem;color:#6b7a99">📚 선행사례</p>
+                    <p style="font-size:0.8rem;color:#ffb300">{sc.get('선행사례','')}</p>
+                </div>""", unsafe_allow_html=True)
+
+                valid_assets = [a for a in assets if a in sc and isinstance(sc[a], tuple)]
+                if valid_assets:
+                    worst = min(sc[a][0] for a in valid_assets)
+                    best  = max(sc[a][1] for a in valid_assets)
+                    st.markdown(f"""<div class="card" style="margin-top:8px;">
+                        <div style="display:flex;gap:16px;text-align:center;">
+                            <div style="flex:1">
+                                <p class="label">최악 충격</p>
+                                <p style="font-size:1.2rem;font-weight:700;color:#ff4e6a;margin:4px 0">{worst:+.0f}%</p>
+                            </div>
+                            <div style="flex:1">
+                                <p class="label">최선 시나리오</p>
+                                <p style="font-size:1.2rem;font-weight:700;color:#00e676;margin:4px 0">{best:+.0f}%</p>
+                            </div>
+                        </div>
+                    </div>""", unsafe_allow_html=True)
+
+            with col_chart:
+                fig_sc = go.Figure()
+                for asset in assets:
+                    if asset not in sc or not isinstance(sc[asset], tuple):
+                        continue
+                    lo, hi = sc[asset]
+                    mid = (lo + hi) / 2
+                    color = '#00e676' if mid > 0 else '#ff4e6a'
+                    fig_sc.add_trace(go.Bar(
+                        name=asset, x=[asset], y=[hi - lo], base=[lo],
+                        marker_color=color, marker_opacity=0.85,
+                        text=f"{lo:+.0f}%~{hi:+.0f}%",
+                        textposition='outside',
+                        hovertemplate=f"<b>{asset}</b><br>범위: {lo:+.0f}% ~ {hi:+.0f}%<extra></extra>",
+                    ))
+                fig_sc.add_hline(y=0, line_color='#6b7a99', line_width=1)
+                fig_sc.update_layout(
+                    height=360, plot_bgcolor='#111827', paper_bgcolor='#111827',
+                    font=dict(color='#c8d0e7', size=10),
+                    xaxis=dict(showgrid=False, tickfont=dict(size=10)),
+                    yaxis=dict(showgrid=True, gridcolor='#2a3555', zeroline=True,
+                               zerolinecolor='#6b7a99', title='예상 변동폭 (%)'),
+                    showlegend=False,
+                    margin=dict(l=10, r=20, t=20, b=10),
+                )
+                st.plotly_chart(fig_sc, use_container_width=True, config={'displayModeBar': False})
+
+            # 전체 25개 요약 테이블
+            with st.expander("📊 전체 25개 시나리오 요약 보기"):
+                summary_rows = []
+                for name, sc_data in scenarios.items():
+                    sp_r  = sc_data.get('S&P500', (0, 0))
+                    btc_r = sc_data.get('BTC', (0, 0))
+                    gld_r = sc_data.get('금', (0, 0))
+                    tlt_r = sc_data.get('장기채(TLT)', (0, 0))
+                    summary_rows.append({
+                        '시나리오': name,
+                        'S&P500': f"{sp_r[0]:+.0f}%~{sp_r[1]:+.0f}%",
+                        'BTC': f"{btc_r[0]:+.0f}%~{btc_r[1]:+.0f}%",
+                        '금(안전자산)': f"{gld_r[0]:+.0f}%~{gld_r[1]:+.0f}%",
+                        '장기채': f"{tlt_r[0]:+.0f}%~{tlt_r[1]:+.0f}%",
+                        '설명': sc_data.get('설명', '')[:35] + '…',
+                    })
+                df_sum = pd.DataFrame(summary_rows)
+                st.dataframe(df_sum, use_container_width=True, hide_index=True)
+
+    # ── Tab 2: 몬테카를로 시뮬레이션 ────────────────────────────────────────
+    with risk_tabs[1]:
+        st.markdown("**기하브라운운동(GBM) 기반 — 10만 개의 미래를 1초 안에 계산**")
+
+        mc_assets_map = {
+            'BTC-USD':  '₿ 비트코인',
+            '^GSPC':    '📈 S&P 500',
+            '^IXIC':    '💻 나스닥',
+            'GC=F':     '🥇 금 선물',
+            'IBIT':     '🏦 BlackRock BTC ETF',
+            'QQQ':      '📊 QQQ ETF',
+            'TLT':      '📉 미 장기채 ETF',
+            'CL=F':     '🛢️ 원유 선물',
+        }
+
+        mc_col1, mc_col2, mc_col3 = st.columns([2, 1, 1])
+        with mc_col1:
+            mc_ticker = st.selectbox(
+                "분석 자산", list(mc_assets_map.keys()),
+                format_func=lambda x: mc_assets_map[x], key='mc_ticker'
+            )
+        with mc_col2:
+            mc_days = st.selectbox(
+                "기간", [30, 60, 90, 180, 252, 504],
+                format_func=lambda x: {30:'30일(1개월)', 60:'60일(2개월)',
+                                       90:'90일(3개월)', 180:'180일(6개월)',
+                                       252:'252일(1년)', 504:'504일(2년)'}[x],
+                index=2, key='mc_days'
+            )
+        with mc_col3:
+            run_mc = st.button("🚀 10만 시뮬레이션 실행",
+                               use_container_width=True, type="primary")
+
+        # 실행 또는 캐시된 결과 표시
+        mc_result = None
+        if run_mc:
+            with st.spinner(f"🔮 {mc_days}일 × 100,000경로 계산 중… (약 1~3초)"):
+                mc_result = run_monte_carlo(mc_ticker, mc_days, 100_000)
+            st.session_state['mc_result']  = mc_result
+            st.session_state['mc_ticker_k'] = mc_ticker
+            st.session_state['mc_days_k']   = mc_days
+        elif 'mc_result' in st.session_state:
+            mc_result  = st.session_state['mc_result']
+            mc_ticker  = st.session_state.get('mc_ticker_k', mc_ticker)
+            mc_days    = st.session_state.get('mc_days_k', mc_days)
+
+        if mc_result:
+            S0          = mc_result['S0']
+            ticker_name = mc_assets_map.get(mc_ticker, mc_ticker)
+
+            # ── 확률 요약 배지 6개 ────────────────────────────────────────
+            p_cols = st.columns(6)
+            prob_items = [
+                (f"+10% 이상",  mc_result['prob_up10'],   '#00e676'),
+                (f"+25% 이상",  mc_result['prob_up25'],   '#00c853'),
+                (f"+50% 이상",  mc_result['prob_up50'],   '#64dd17'),
+                (f"-10% 이하",  mc_result['prob_down10'], '#ff8a65'),
+                (f"-25% 이하",  mc_result['prob_down25'], '#ff4e6a'),
+                (f"-50% 이하",  mc_result['prob_down50'], '#d50000'),
+            ]
+            for col, (label, prob, color) in zip(p_cols, prob_items):
+                with col:
+                    st.markdown(f"""<div class="card" style="text-align:center;padding:10px 6px;">
+                        <p style="font-size:0.7rem;color:#6b7a99;margin:0">{label}</p>
+                        <p style="font-size:1.3rem;font-weight:700;color:{color};margin:4px 0">{prob:.1f}%</p>
+                    </div>""", unsafe_allow_html=True)
+
+            # ── 팬 차트 + 히스토그램 ─────────────────────────────────────
+            fan_col, hist_col = st.columns([3, 2])
+
+            with fan_col:
+                fig_fan = go.Figure()
+                paths_s = mc_result['paths_sample']
+                x_ax    = list(range(mc_days))
+
+                # 200개 샘플 경로
+                for i in range(min(200, paths_s.shape[1])):
+                    fig_fan.add_trace(go.Scatter(
+                        x=x_ax, y=paths_s[:, i], mode='lines',
+                        line=dict(width=0.3, color='rgba(59,91,219,0.12)'),
+                        showlegend=False, hoverinfo='skip',
+                    ))
+
+                # 백분위 수평선
+                pct_lines = [
+                    (mc_result['p95'], 'P95 (상위5%)', '#00e676', 2),
+                    (mc_result['p75'], 'P75',          '#69db7c', 1.5),
+                    (mc_result['p50'], 'P50 중앙값',   '#ffb300', 2.5),
+                    (mc_result['p25'], 'P25',          '#ff8a65', 1.5),
+                    (mc_result['p5'],  'P5 (하위5%)',  '#ff4e6a', 2),
+                ]
+                for pval, plabel, pcolor, pw in pct_lines:
+                    fig_fan.add_hline(
+                        y=pval, line_color=pcolor, line_width=pw,
+                        annotation_text=f"{plabel}: ${pval:,.0f}",
+                        annotation_position="right",
+                        annotation_font=dict(color=pcolor, size=9),
+                    )
+
+                fig_fan.add_hline(
+                    y=S0, line_color='#ffffff', line_dash='dash', line_width=1.5,
+                    annotation_text=f"현재: ${S0:,.0f}",
+                    annotation_position="left",
+                    annotation_font=dict(color='#ffffff', size=9),
+                )
+                fig_fan.update_layout(
+                    title=dict(text=f"{ticker_name} — {mc_days}일 경로 (200샘플 / 전체 10만)",
+                               font=dict(size=11, color='#c8d0e7')),
+                    height=330, plot_bgcolor='#111827', paper_bgcolor='#111827',
+                    font=dict(color='#c8d0e7'),
+                    xaxis=dict(showgrid=False, title='거래일', tickfont=dict(size=9)),
+                    yaxis=dict(showgrid=True, gridcolor='#2a3555',
+                               title='가격 (USD)', tickfont=dict(size=9)),
+                    margin=dict(l=10, r=90, t=40, b=30),
+                    showlegend=False,
+                )
+                st.plotly_chart(fig_fan, use_container_width=True, config={'displayModeBar': False})
+
+            with hist_col:
+                final_arr = mc_result['final']
+                # 히스토그램용 5000개 샘플
+                idx_s  = np.random.choice(len(final_arr), min(5000, len(final_arr)), replace=False)
+                f_samp = final_arr[idx_s]
+
+                fig_hist = go.Figure()
+                fig_hist.add_trace(go.Histogram(
+                    x=f_samp, nbinsx=60,
+                    marker_color='#3b5bdb', marker_opacity=0.8, name='분포'
+                ))
+                for pval, plabel, pcolor in [
+                    (mc_result['p5'],  'P5',  '#ff4e6a'),
+                    (mc_result['p50'], 'P50', '#ffb300'),
+                    (mc_result['p95'], 'P95', '#00e676'),
+                ]:
+                    fig_hist.add_vline(
+                        x=pval, line_color=pcolor, line_width=1.5,
+                        annotation_text=plabel,
+                        annotation_font=dict(color=pcolor, size=9),
+                    )
+                fig_hist.add_vline(
+                    x=S0, line_color='white', line_dash='dash', line_width=1.5,
+                    annotation_text="현재",
+                    annotation_font=dict(color='white', size=9),
+                )
+                fig_hist.update_layout(
+                    title=dict(text=f"{mc_days}일 후 최종 가격 분포",
+                               font=dict(size=11, color='#c8d0e7')),
+                    height=330, plot_bgcolor='#111827', paper_bgcolor='#111827',
+                    font=dict(color='#c8d0e7'),
+                    xaxis=dict(showgrid=False, title='최종 가격', tickfont=dict(size=9)),
+                    yaxis=dict(showgrid=True, gridcolor='#2a3555', title='빈도', tickfont=dict(size=9)),
+                    margin=dict(l=10, r=10, t=40, b=30),
+                    showlegend=False, bargap=0.05,
+                )
+                st.plotly_chart(fig_hist, use_container_width=True, config={'displayModeBar': False})
+
+            # ── 백분위 통계 카드 ─────────────────────────────────────────
+            st.markdown(f"""<div class="card">
+                <p style="font-weight:700;color:#c8d0e7;margin-bottom:8px">
+                    📊 {mc_days}일 후 {ticker_name} 가격 예측 분포 &nbsp;|&nbsp;
+                    현재: <span style="color:#ffb300">${S0:,.2f}</span>
+                </p>
+                <div style="display:flex;gap:12px;flex-wrap:wrap;text-align:center;">
+                    <div style="flex:1;min-width:80px">
+                        <p class="label">P5 (최악 5%)</p>
+                        <p style="color:#ff4e6a;font-weight:700;margin:2px 0">${mc_result['p5']:,.0f}</p>
+                        <p class="label">({(mc_result['p5']/S0-1)*100:+.1f}%)</p>
+                    </div>
+                    <div style="flex:1;min-width:80px">
+                        <p class="label">P25</p>
+                        <p style="color:#ff8a65;font-weight:700;margin:2px 0">${mc_result['p25']:,.0f}</p>
+                        <p class="label">({(mc_result['p25']/S0-1)*100:+.1f}%)</p>
+                    </div>
+                    <div style="flex:1;min-width:80px">
+                        <p class="label">P50 (중앙값)</p>
+                        <p style="color:#ffb300;font-weight:700;margin:2px 0">${mc_result['p50']:,.0f}</p>
+                        <p class="label">({(mc_result['p50']/S0-1)*100:+.1f}%)</p>
+                    </div>
+                    <div style="flex:1;min-width:80px">
+                        <p class="label">P75</p>
+                        <p style="color:#69db7c;font-weight:700;margin:2px 0">${mc_result['p75']:,.0f}</p>
+                        <p class="label">({(mc_result['p75']/S0-1)*100:+.1f}%)</p>
+                    </div>
+                    <div style="flex:1;min-width:80px">
+                        <p class="label">P95 (최선 5%)</p>
+                        <p style="color:#00e676;font-weight:700;margin:2px 0">${mc_result['p95']:,.0f}</p>
+                        <p class="label">({(mc_result['p95']/S0-1)*100:+.1f}%)</p>
+                    </div>
+                </div>
+                <hr style="border-color:#2a3555;margin:8px 0">
+                <p style="font-size:0.78rem;color:#6b7a99">
+                    💡 추정 모수 — 일간 수익률: μ={mc_result['mu']*100:.4f}%, σ={mc_result['sigma']*100:.3f}%
+                    &nbsp;|&nbsp; 연환산 변동성(σ×√252): {mc_result['sigma']*100*(252**0.5):.1f}%
+                    &nbsp;|&nbsp; GBM: S(t) = S₀·exp((μ-σ²/2)t + σ√t·Z)
+                </p>
+            </div>""", unsafe_allow_html=True)
+
+        else:
+            st.markdown("""<div class="card" style="text-align:center;padding:48px 20px;">
+                <p style="font-size:2.5rem;margin:0">🔮</p>
+                <p style="color:#9aa5c0;font-size:1rem;margin:12px 0">
+                    자산과 기간을 선택 후 <strong style="color:#fff">🚀 10만 시뮬레이션 실행</strong> 버튼을 클릭하세요</p>
+                <p style="font-size:0.8rem;color:#6b7a99;margin:0">
+                    GBM(기하브라운운동) | 1년치 실제 데이터로 μ·σ 추정 | numpy 벡터화 — 10만 경로 ≈ 1초</p>
+            </div>""", unsafe_allow_html=True)
 
     # ── 푸터 ──────────────────────────────────────────────────────────────────
     st.markdown("---")

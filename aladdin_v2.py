@@ -514,38 +514,137 @@ def run_monte_carlo(ticker_symbol: str, days: int, n_sim: int = 100_000):
 
 
 def get_economic_calendar():
-    """주요 경제 이벤트 캘린더 — 2026년 일정"""
+    """주요 경제 이벤트 캘린더 — 미국🇺🇸 + 한국🇰🇷 2026년 일정
+    형식: (날짜, 국가, 이름, 중요도('high'/'mid'), 설명)
+    """
     events = [
-        # (날짜, 이름, 중요도, 예상영향, 아이콘)
-        ("2026-05-13", "미국 CPI 발표",        "🔴", "인플레이션 핵심 지표 — 금리 방향 결정", "📊"),
-        ("2026-05-15", "미국 소매판매",          "🟡", "소비 경기 가늠자",                    "🛍️"),
-        ("2026-05-22", "FOMC 회의록 공개",       "🔴", "Fed 향후 금리 힌트",                   "🏦"),
-        ("2026-06-05", "미국 NFP 고용지표",      "🔴", "고용 = 금리 결정의 핵심",              "👷"),
-        ("2026-06-10", "미국 CPI 발표",         "🔴", "인플레이션 핵심 지표",                  "📊"),
-        ("2026-06-17", "FOMC 금리 결정",        "🔴 🔴", "금리 인하/동결/인상 결정",           "🏛️"),
-        ("2026-06-25", "미국 GDP (1분기 최종)",  "🟡", "경기침체 여부 판단 기준",               "📈"),
-        ("2026-07-02", "미국 NFP 고용지표",      "🔴", "고용 = 금리 결정의 핵심",              "👷"),
-        ("2026-07-14", "미국 CPI 발표",         "🔴", "인플레이션 핵심 지표",                  "📊"),
-        ("2026-07-28", "FOMC 금리 결정",        "🔴 🔴", "금리 인하/동결/인상 결정",           "🏛️"),
-        ("2026-08-06", "미국 NFP 고용지표",      "🔴", "고용 = 금리 결정의 핵심",              "👷"),
-        ("2026-08-12", "미국 CPI 발표",         "🔴", "인플레이션 핵심 지표",                  "📊"),
-        ("2026-09-15", "FOMC 금리 결정",        "🔴 🔴", "금리 인하/동결/인상 결정",           "🏛️"),
+        # ── 2026년 5월 ─────────────────────────────────────────────
+        ("2026-05-12", "🇰🇷", "금통위 기준금리",    "high", "한국은행 기준금리 결정"),
+        ("2026-05-13", "🇺🇸", "CPI 발표",           "high", "인플레이션 핵심 지표 — 금리 방향"),
+        ("2026-05-15", "🇺🇸", "소매판매",            "mid",  "소비 경기 가늠자"),
+        ("2026-05-20", "🇰🇷", "수출입(4월)",         "mid",  "무역수지 — 경기 선행"),
+        ("2026-05-22", "🇺🇸", "FOMC 회의록",        "high", "Fed 향후 금리 힌트"),
+        ("2026-05-27", "🇰🇷", "소비자물가(CPI)",     "high", "한국 인플레이션 지표"),
+        ("2026-05-29", "🇺🇸", "PCE 물가",           "high", "Fed 선호 인플레이션 지표"),
+        # ── 2026년 6월 ─────────────────────────────────────────────
+        ("2026-06-03", "🇰🇷", "GDP (1분기 확정)",   "mid",  "성장률 최종 확정치"),
+        ("2026-06-05", "🇺🇸", "NFP 고용",           "high", "비농업 고용 — 금리 결정 핵심"),
+        ("2026-06-09", "🇰🇷", "실업률",             "mid",  "고용 동향 파악"),
+        ("2026-06-10", "🇺🇸", "CPI 발표",           "high", "인플레이션 핵심 지표"),
+        ("2026-06-17", "🇺🇸", "FOMC 금리결정",      "high", "금리 인하/동결/인상 결정"),
+        ("2026-06-23", "🇰🇷", "금통위 기준금리",    "high", "한국은행 기준금리 결정"),
+        ("2026-06-25", "🇺🇸", "GDP (1분기 최종)",   "mid",  "경기침체 여부 판단 기준"),
+        ("2026-06-26", "🇺🇸", "PCE 물가",           "high", "Fed 선호 인플레이션 지표"),
+        ("2026-06-30", "🇰🇷", "수출입(5월)",         "mid",  "무역수지"),
+        # ── 2026년 7월 ─────────────────────────────────────────────
+        ("2026-07-02", "🇺🇸", "NFP 고용",           "high", "비농업 고용"),
+        ("2026-07-08", "🇰🇷", "수출입(6월)",         "mid",  "무역수지"),
+        ("2026-07-14", "🇺🇸", "CPI 발표",           "high", "인플레이션 핵심 지표"),
+        ("2026-07-22", "🇰🇷", "금통위 기준금리",    "high", "한국은행 기준금리 결정"),
+        ("2026-07-24", "🇰🇷", "소비자물가(CPI)",     "high", "한국 인플레이션 지표"),
+        ("2026-07-28", "🇺🇸", "FOMC 금리결정",      "high", "금리 인하/동결/인상 결정"),
+        ("2026-07-30", "🇺🇸", "GDP (2분기 예비)",   "mid",  "2분기 경기 성적표"),
+        # ── 2026년 8월 ─────────────────────────────────────────────
+        ("2026-08-06", "🇺🇸", "NFP 고용",           "high", "비농업 고용"),
+        ("2026-08-12", "🇺🇸", "CPI 발표",           "high", "인플레이션 핵심 지표"),
+        ("2026-08-25", "🇺🇸", "잭슨홀 심포지엄",    "high", "Fed 의장 연설 — 정책 방향 신호"),
+        ("2026-08-27", "🇰🇷", "금통위 기준금리",    "high", "한국은행 기준금리 결정"),
+        ("2026-08-28", "🇰🇷", "소비자물가(CPI)",     "high", "한국 인플레이션 지표"),
+        # ── 2026년 9월 ─────────────────────────────────────────────
+        ("2026-09-03", "🇺🇸", "NFP 고용",           "high", "비농업 고용"),
+        ("2026-09-10", "🇺🇸", "CPI 발표",           "high", "인플레이션 핵심 지표"),
+        ("2026-09-15", "🇺🇸", "FOMC 금리결정",      "high", "금리 인하/동결/인상 결정"),
+        ("2026-09-24", "🇰🇷", "금통위 기준금리",    "high", "한국은행 기준금리 결정"),
     ]
     today = datetime.now().date()
     result = []
-    for date_str, name, importance, desc, icon in events:
+    for date_str, flag, name, importance, desc in events:
         event_date = datetime.strptime(date_str, "%Y-%m-%d").date()
         days_left = (event_date - today).days
-        if days_left >= 0:
-            result.append({
-                'date': date_str,
-                'name': name,
-                'importance': importance,
-                'desc': desc,
-                'icon': icon,
-                'days_left': days_left,
-            })
-    return sorted(result, key=lambda x: x['days_left'])[:7]
+        result.append({
+            'date': date_str,
+            'flag': flag,
+            'name': name,
+            'importance': importance,
+            'desc': desc,
+            'days_left': days_left,
+        })
+    return sorted(result, key=lambda x: x['days_left'])
+
+
+def render_calendar_month(year: int, month: int, events_by_date: dict, today) -> str:
+    """월별 캘린더 HTML 생성 — 미국🇺🇸 파란색, 한국🇰🇷 주황색"""
+    import calendar as cal_mod
+    WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일']
+
+    header_cells = "".join(
+        f'<th style="padding:6px 2px;font-size:0.72rem;color:#6b7a99;'
+        f'font-weight:600;border-bottom:1px solid #2a3555;text-align:center;">{d}</th>'
+        for d in WEEKDAYS
+    )
+
+    rows_html = ""
+    for week in cal_mod.monthcalendar(year, month):
+        row_html = ""
+        for day in week:
+            if day == 0:
+                row_html += '<td style="background:#080b14;border:1px solid #111827;padding:4px;vertical-align:top;min-height:72px;"></td>'
+                continue
+
+            from datetime import date as _date
+            cell_date = _date(year, month, day)
+            date_str  = f"{year:04d}-{month:02d}-{day:02d}"
+            is_today  = (cell_date == today)
+            is_past   = (cell_date < today)
+
+            # 요일 (0=월 ~ 6=일)
+            weekday = cell_date.weekday()
+            if weekday == 5:    day_color = "#4a8cff"   # 토 — 파란색
+            elif weekday == 6:  day_color = "#ff4e6a"   # 일 — 빨간색
+            elif is_today:      day_color = "#00e676"   # 오늘 — 초록색
+            elif is_past:       day_color = "#3a3a4a"   # 과거 — 회색
+            else:               day_color = "#c8d0e7"
+
+            day_bg     = "#0d2a1e" if is_today else "#0c0f1a"
+            day_border = "#00e676" if is_today else ("#1e2535" if not is_past else "#111827")
+            today_dot  = '<span style="display:inline-block;width:6px;height:6px;background:#00e676;border-radius:50%;margin-left:4px;vertical-align:middle;"></span>' if is_today else ''
+
+            ev_html = ""
+            for ev in events_by_date.get(date_str, []):
+                is_us = ev['flag'] == '🇺🇸'
+                if ev['importance'] == 'high':
+                    bg_ev    = "#162040" if is_us else "#261400"
+                    border_c = "#4a8cff" if is_us else "#ff9800"
+                    txt_c    = "#82b4ff" if is_us else "#ffb300"
+                else:
+                    bg_ev    = "#0e1520" if is_us else "#1a0f00"
+                    border_c = "#2a3a60" if is_us else "#4a3000"
+                    txt_c    = "#5a7aaa" if is_us else "#7a5500"
+
+                ev_desc  = ev['desc']
+                ev_flag  = ev['flag']
+                ev_name  = ev['name']
+                ev_html += (
+                    f'<div title="{ev_desc}" style="background:{bg_ev};border-left:2px solid {border_c};'
+                    f'padding:2px 4px;margin:2px 0;border-radius:0 3px 3px 0;font-size:0.62rem;'
+                    f'color:{txt_c};line-height:1.3;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;'
+                    f'cursor:default;">{ev_flag} {ev_name}</div>'
+                )
+
+            row_html += (
+                f'<td style="background:{day_bg};border:1px solid {day_border};padding:5px 4px;'
+                f'vertical-align:top;min-height:72px;width:14.28%;">'
+                f'<div style="font-weight:700;color:{day_color};font-size:0.8rem;margin-bottom:3px;">'
+                f'{day}{today_dot}</div>{ev_html}</td>'
+            )
+        rows_html += f"<tr>{row_html}</tr>"
+
+    return (
+        f'<table style="width:100%;border-collapse:collapse;table-layout:fixed;">'
+        f'<thead><tr>{header_cells}</tr></thead>'
+        f'<tbody>{rows_html}</tbody>'
+        f'</table>'
+    )
 
 
 def load_briefing():
@@ -609,32 +708,94 @@ def main():
     )
 
     # ── 경제 캘린더 (최상단) ────────────────────────────────────────────────────
-    calendar = get_economic_calendar()
-    if calendar:
-        st.markdown("### 📅 주요 경제 일정")
-        cols_cal = st.columns(len(calendar))
-        for col, ev in zip(cols_cal, calendar):
+    all_events  = get_economic_calendar()
+    today_date  = now.date()
+
+    # 날짜별 이벤트 딕셔너리 구성
+    events_by_date: dict = {}
+    for ev in all_events:
+        events_by_date.setdefault(ev['date'], []).append(ev)
+
+    # 다가오는 이벤트 (오늘 이후)
+    upcoming = [e for e in all_events if e['days_left'] >= 0]
+
+    st.markdown("### 📅 경제 캘린더 &nbsp; <span style='font-size:0.75rem;color:#6b7a99;font-weight:400;'>🇺🇸 미국 &nbsp;|&nbsp; 🇰🇷 한국</span>", unsafe_allow_html=True)
+
+    # ── D-day 스트립 (다가오는 5개) ──────────────────────────────────────────
+    if upcoming:
+        strip_events = upcoming[:5]
+        strip_cols   = st.columns(len(strip_events))
+        for col, ev in zip(strip_cols, strip_events):
             d = ev['days_left']
             if d == 0:
-                badge_color = "#ff4e6a"; badge_txt = "🔔 오늘!"
+                bc = "#ff4e6a"; bt = "🔔 오늘!"
             elif d <= 3:
-                badge_color = "#ff9800"; badge_txt = f"D-{d}"
+                bc = "#ff9800"; bt = f"D-{d}"
             elif d <= 7:
-                badge_color = "#ffb300"; badge_txt = f"D-{d}"
+                bc = "#ffb300"; bt = f"D-{d}"
             else:
-                badge_color = "#3b5bdb"; badge_txt = f"D-{d}"
+                bc = "#3b5bdb"; bt = f"D-{d}"
+            is_us = ev['flag'] == '🇺🇸'
+            border_c = "#3b5bdb44" if is_us else "#ff980044"
             with col:
-                st.markdown(f"""<div class="card" style="text-align:center;padding:12px 8px;">
-                    <p style="font-size:1.3rem;margin:0">{ev['icon']}</p>
-                    <p style="font-size:0.72rem;color:#9aa5c0;margin:2px 0">{ev['date']}</p>
-                    <p style="font-size:0.78rem;font-weight:700;color:#c8d0e7;margin:4px 0;line-height:1.3">{ev['name']}</p>
-                    <div style="margin:6px 0;">
-                        <span style="background:{badge_color}22;color:{badge_color};border:1px solid {badge_color};
-                            padding:2px 10px;border-radius:20px;font-weight:700;font-size:0.85rem;">{badge_txt}</span>
-                    </div>
-                    <p style="font-size:0.68rem;color:#6b7a99;margin:0;line-height:1.4">{ev['importance']} {ev['desc']}</p>
+                st.markdown(f"""<div class="card" style="text-align:center;padding:10px 6px;border-color:{border_c};">
+                    <p style="font-size:1.1rem;margin:0">{ev['flag']}</p>
+                    <p style="font-size:0.68rem;color:#9aa5c0;margin:2px 0">{ev['date']}</p>
+                    <p style="font-size:0.75rem;font-weight:700;color:#c8d0e7;margin:3px 0;line-height:1.3">{ev['name']}</p>
+                    <span style="background:{bc}22;color:{bc};border:1px solid {bc};
+                        padding:1px 8px;border-radius:20px;font-weight:700;font-size:0.8rem;">{bt}</span>
+                    <p style="font-size:0.64rem;color:#6b7a99;margin:4px 0 0 0;line-height:1.3">{'🔴' if ev['importance']=='high' else '🟡'} {ev['desc'][:28]}</p>
                 </div>""", unsafe_allow_html=True)
-        st.markdown("---")
+
+    # ── 월별 캘린더 그리드 ────────────────────────────────────────────────────
+    this_month_str  = today_date.strftime("%Y년 %m월")
+    months_to_show  = []
+    for delta in range(3):    # 이번달 + 다음 2개월
+        import calendar as cal_mod
+        y = today_date.year + (today_date.month - 1 + delta) // 12
+        m = (today_date.month - 1 + delta) % 12 + 1
+        months_to_show.append((y, m))
+
+    tab_labels = [f"{y}년 {m:02d}월" for y, m in months_to_show]
+    cal_tabs   = st.tabs(tab_labels)
+
+    for tab, (y, m) in zip(cal_tabs, months_to_show):
+        with tab:
+            # 범례
+            st.markdown(
+                '<div style="display:flex;gap:16px;margin-bottom:8px;font-size:0.72rem;">'
+                '<span style="color:#82b4ff">🔵 🇺🇸 고중요</span>'
+                '<span style="color:#5a7aaa">⚪ 🇺🇸 중요</span>'
+                '<span style="color:#ffb300">🟠 🇰🇷 고중요</span>'
+                '<span style="color:#7a5500">⚪ 🇰🇷 중요</span>'
+                '<span style="color:#00e676">🟢 오늘</span>'
+                '</div>',
+                unsafe_allow_html=True
+            )
+            cal_html = render_calendar_month(y, m, events_by_date, today_date)
+            st.markdown(cal_html, unsafe_allow_html=True)
+
+            # 이번 달 이벤트 목록
+            month_prefix = f"{y:04d}-{m:02d}"
+            month_evs    = [e for e in all_events if e['date'].startswith(month_prefix)]
+            if month_evs:
+                with st.expander(f"📋 {y}년 {m}월 이벤트 목록 ({len(month_evs)}건)"):
+                    for ev in month_evs:
+                        d_txt = f"D-{ev['days_left']}" if ev['days_left'] > 0 else ("🔔오늘" if ev['days_left'] == 0 else f"D+{-ev['days_left']}")
+                        imp_dot = "🔴" if ev['importance'] == 'high' else "🟡"
+                        st.markdown(
+                            f"<div style='display:flex;align-items:center;gap:8px;padding:5px 0;"
+                            f"border-bottom:1px solid #1e2535;font-size:0.8rem;'>"
+                            f"<span style='color:#6b7a99;min-width:70px'>{ev['date']}</span>"
+                            f"<span>{ev['flag']}</span>"
+                            f"<span style='color:#c8d0e7;flex:1'>{imp_dot} {ev['name']}</span>"
+                            f"<span style='color:#6b7a99;font-size:0.72rem'>{ev['desc'][:30]}</span>"
+                            f"<span style='min-width:40px;text-align:right;color:#ffb300;font-size:0.72rem'>{d_txt}</span>"
+                            f"</div>",
+                            unsafe_allow_html=True
+                        )
+
+    st.markdown("---")
 
     # ── 데이터 로딩 ────────────────────────────────────────────────────────────
     with st.spinner("전세계 시장 + 기관 ETF 데이터 수집 중..."):
